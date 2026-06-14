@@ -16,14 +16,17 @@
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-opener": "^2.2.6",
     "@tauri-apps/plugin-store": "^2.2.0",
-    "dompurify": "^3.2.3",
-    "highlight.js": "^11.11.1",
-    "markdown-it": "^14.1.0"
+    "highlight.js": "^11.11.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.2.5",
     "@types/markdown-it": "^14.1.2",
+    "@types/node": "^25.9.3",
+    "dompurify": "^3.4.10",
     "jsdom": "^25.0.1",
+    "markdown-it": "^14.2.0",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-task-lists": "^2.1.1",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vitest": "^2.1.8"
