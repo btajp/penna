@@ -18,8 +18,20 @@ export async function highlightAllWith(
 ): Promise<void> {
   const blocks = root.querySelectorAll<HTMLElement>("pre code");
   if (blocks.length === 0) return;
-  const hljs = (await importer()).default;
-  blocks.forEach((block) => hljs.highlightElement(block));
+  let hljs: HljsModule["default"];
+  try {
+    hljs = (await importer()).default;
+  } catch {
+    // highlight.js failed to load — skip silently, leave code unhighlighted.
+    return;
+  }
+  blocks.forEach((block) => {
+    try {
+      hljs.highlightElement(block);
+    } catch {
+      // A single malformed block must not abort highlighting the rest.
+    }
+  });
 }
 
 /**

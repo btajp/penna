@@ -32,4 +32,31 @@ describe("highlightAllWith", () => {
     const blocks = root.querySelectorAll("pre code");
     blocks.forEach((b) => expect(b.classList.contains("hljs")).toBe(true));
   });
+
+  it("resolves without throwing when the importer rejects", async () => {
+    const root = document.createElement("div");
+    root.innerHTML = '<pre><code class="language-js">1</code></pre>';
+    await expect(
+      highlightAllWith(root, () => Promise.reject(new Error("boom"))),
+    ).resolves.toBeUndefined();
+  });
+
+  it("continues highlighting remaining blocks when one block throws", async () => {
+    const root = document.createElement("div");
+    root.innerHTML =
+      '<pre><code class="language-js">1</code></pre>' +
+      '<pre><code class="language-ts">2</code></pre>';
+    const highlightElement = vi.fn((el: HTMLElement) => {
+      if (el.textContent === "1") throw new Error("bad block");
+      el.classList.add("hljs");
+    });
+    const importer = vi.fn(async () => ({ default: { highlightElement } }));
+    await expect(
+      highlightAllWith(root, importer),
+    ).resolves.toBeUndefined();
+    expect(highlightElement).toHaveBeenCalledTimes(2);
+    const blocks = root.querySelectorAll("pre code");
+    expect(blocks[0].classList.contains("hljs")).toBe(false);
+    expect(blocks[1].classList.contains("hljs")).toBe(true);
+  });
 });
