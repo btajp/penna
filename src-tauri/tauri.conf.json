@@ -10,9 +10,25 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [],
+    "windows": [
+      {
+        "label": "doc-1",
+        "title": "penna",
+        "width": 900,
+        "height": 700,
+        "minWidth": 360,
+        "minHeight": 240,
+        "visible": false,
+        "decorations": true,
+        "resizable": true
+      }
+    ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https: data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; frame-src 'none'; object-src 'none'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
     }
   },
   "bundle": {
@@ -24,6 +40,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "name": "Markdown Document",
+        "role": "Viewer",
+        "ext": ["md", "markdown", "mdown", "mkd", "mkdn", "mdwn"],
+        "mimeType": "text/markdown",
+        "description": "Markdown document"
+      }
     ]
   }
 }
