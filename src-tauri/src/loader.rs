@@ -41,8 +41,8 @@ pub fn detect_kind(path: &Path) -> FileKind {
 
 /// パスを読み込み、エンコーディングを自動判定して UTF-8 文字列に変換した LoadedFile を返す。
 pub fn load_file(path: &Path) -> Result<LoadedFile, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
 
     // 1) BOM があればそれを最優先（chardetng は BOM を見ない）。
     let (encoding, content) = match Encoding::for_bom(&bytes) {
@@ -76,7 +76,10 @@ mod tests {
     fn detect_kind_recognizes_markdown_extensions() {
         assert_eq!(detect_kind(&PathBuf::from("README.md")), FileKind::Markdown);
         assert_eq!(detect_kind(&PathBuf::from("DOC.MD")), FileKind::Markdown);
-        assert_eq!(detect_kind(&PathBuf::from("notes.markdown")), FileKind::Markdown);
+        assert_eq!(
+            detect_kind(&PathBuf::from("notes.markdown")),
+            FileKind::Markdown
+        );
         assert_eq!(detect_kind(&PathBuf::from("a.mkd")), FileKind::Markdown);
     }
 
@@ -156,8 +159,14 @@ mod tests {
 
     #[test]
     fn file_kind_serializes_as_variant_name() {
-        assert_eq!(serde_json::to_string(&FileKind::Markdown).unwrap(), "\"Markdown\"");
-        assert_eq!(serde_json::to_string(&FileKind::PlainText).unwrap(), "\"PlainText\"");
+        assert_eq!(
+            serde_json::to_string(&FileKind::Markdown).unwrap(),
+            "\"Markdown\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FileKind::PlainText).unwrap(),
+            "\"PlainText\""
+        );
     }
 
     #[test]
