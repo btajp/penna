@@ -1,6 +1,12 @@
+mod commands;
 mod loader;
 mod settings;
 mod watcher;
+mod window;
+
+use tauri::Manager;
+
+use crate::window::WindowRegistry;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -15,17 +21,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // open an empty window on first launch (replaced by startup/CLI task)
-            let _ = tauri::WebviewWindowBuilder::new(
-                app,
-                "doc-1",
-                tauri::WebviewUrl::App("index.html".into()),
-            )
-            .title("penna")
-            .inner_size(900.0, 700.0)
-            .build()?;
+            app.manage(WindowRegistry::new());
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            commands::load_file,
+            commands::get_settings,
+            commands::set_settings,
+            commands::open_file_dialog,
+            commands::open_external,
+            commands::open_in_new_window,
+            commands::window_path,
+        ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("error while running penna");
 }
