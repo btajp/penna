@@ -52,6 +52,11 @@ pub async fn open_file_dialog(app: AppHandle) -> Option<String> {
 /// 外部 URL を OS 既定ブラウザで開く（webview は遷移させない）。
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
+    let allowed =
+        url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:");
+    if !allowed {
+        return Err(format!("refused to open non-external URL: {url}"));
+    }
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| format!("failed to open url: {e}"))

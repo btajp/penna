@@ -109,10 +109,7 @@ pub fn open_document(app: &tauri::AppHandle, path: PathBuf) -> Result<String, St
     let close_app = app.clone();
     let close_label = label.clone();
     window.on_window_event(move |event| {
-        if matches!(
-            event,
-            tauri::WindowEvent::Destroyed | tauri::WindowEvent::CloseRequested { .. }
-        ) {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
             let registry = close_app.state::<WindowRegistry>();
             registry.remove(&close_label);
             persist_session(&close_app);
