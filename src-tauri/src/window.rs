@@ -102,6 +102,19 @@ pub fn open_document(app: &tauri::AppHandle, path: PathBuf) -> Result<String, St
 
     registry.register(&label, path.clone());
 
+    // 開いたファイルの親ディレクトリを asset プロトコルスコープに再帰許可する。
+    // これにより document からの相対パス画像を asset: / convertFileSrc で配信できる。
+    // スコープ許可に失敗しても open は失敗させず、ログのみ残す（画像は出ないが本文は表示される）。
+    if let Some(parent) = path.parent() {
+        if let Err(e) = app.asset_protocol_scope().allow_directory(parent, true) {
+            eprintln!(
+                "penna: failed to allow asset scope for {}: {}",
+                parent.display(),
+                e
+            );
+        }
+    }
+
     let watcher = watcher::watch_file(app.clone(), label.clone(), path);
     registry.keep_watcher(&label, watcher);
 
