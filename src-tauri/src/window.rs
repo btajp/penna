@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -151,6 +151,71 @@ pub fn persist_session(app: &tauri::AppHandle) {
     }
 }
 
+/// 起動引数列からファイルパスを 1 つ取り出す純関数。
+/// - 先頭要素（プログラム名）は読み飛ばす。
+/// - `-` で始まるフラグは無視する。
+/// - 最初に見つかった非フラグのトークンをパスとして採用する。
+/// - 絶対パスはそのまま、相対パスは cwd に結合する。
+/// - 該当が無ければ None。
+pub fn parse_file_arg(args: &[String], cwd: &Path) -> Option<PathBuf> {
+    args.iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .map(|a| {
+            let p = PathBuf::from(a);
+            if p.is_absolute() {
+                p
+            } else {
+                cwd.join(p)
+            }
+        })
+}
+
+/// 二次起動（single-instance）の引数とカレントディレクトリから、適切なウィンドウを開く。
+/// パスが取れれば open_document、取れなければ open_empty_window を呼ぶ。
+/// 二次起動はセッション復元の対象外（常にその起動の指示だけを反映する）。
+pub fn open_from_args(app: &tauri::AppHandle, args: &[String], cwd: &Path) -> Result<String, String> {
+    match parse_file_arg(args, cwd) {
+        Some(path) => open_document(app, path),
+        None => open_empty_window(app),
+    }
+}
+
+/// 初回起動の振り分け（セッション復元考慮、spec §5）。
+/// - ファイル引数あり: そのファイルを開く（復元しない）。
+/// - 引数なし & session_restore=ON: sessionPaths を開き直す（空なら空ウィンドウ）。
+/// - 引数なし & session_restore=OFF（既定）: 空ウィンドウを 1 枚開く。
+pub fn open_first_launch(app: &tauri::AppHandle, args: &[String], cwd: &Path) -> Result<(), String> {
+    if let Some(path) = parse_file_arg(args, cwd) {
+        open_document(app, path)?;
+        return Ok(());
+    }
+
+    let settings = crate::settings::load_settings(app);
+    if !settings.session_restore() {
+        open_empty_window(app)?;
+        return Ok(());
+    }
+
+    // session_restore=ON: 前回の sessionPaths を読み出して開き直す。
+    let restored: Vec<String> = match app.store("settings.json") {
+        Ok(store) => store
+            .get("sessionPaths")
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+
+    if restored.is_empty() {
+        open_empty_window(app)?;
+    } else {
+        for p in restored {
+            open_document(app, PathBuf::from(p))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,5 +270,48 @@ mod tests {
         reg.remove("doc-1");
         assert_eq!(reg.path_for("doc-1"), None);
         assert_eq!(reg.snapshot(), vec![PathBuf::from("/tmp/b.md")]);
+    }
+
+    #[test]
+    fn parse_file_arg_absolute_path_unchanged() {
+        let args = vec!["penna".to_string(), "/abs/file.md".to_string()];
+        let cwd = Path::new("/home/user");
+        assert_eq!(parse_file_arg(&args, cwd), Some(PathBuf::from("/abs/file.md")));
+    }
+
+    #[test]
+    fn parse_file_arg_relative_path_joined_to_cwd() {
+        let args = vec!["penna".to_string(), "docs/readme.md".to_string()];
+        let cwd = Path::new("/home/user");
+        assert_eq!(
+            parse_file_arg(&args, cwd),
+            Some(PathBuf::from("/home/user/docs/readme.md"))
+        );
+    }
+
+    #[test]
+    fn parse_file_arg_no_arg_is_none() {
+        let args = vec!["penna".to_string()];
+        let cwd = Path::new("/home/user");
+        assert_eq!(parse_file_arg(&args, cwd), None);
+    }
+
+    #[test]
+    fn parse_file_arg_ignores_flags() {
+        let args = vec![
+            "penna".to_string(),
+            "--debug".to_string(),
+            "-v".to_string(),
+            "notes.md".to_string(),
+        ];
+        let cwd = Path::new("/work");
+        assert_eq!(parse_file_arg(&args, cwd), Some(PathBuf::from("/work/notes.md")));
+    }
+
+    #[test]
+    fn parse_file_arg_only_flags_is_none() {
+        let args = vec!["penna".to_string(), "--version".to_string()];
+        let cwd = Path::new("/work");
+        assert_eq!(parse_file_arg(&args, cwd), None);
     }
 }
