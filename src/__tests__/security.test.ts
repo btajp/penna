@@ -62,6 +62,11 @@ describe("security: malicious markdown is neutralized", () => {
     expect(html.toLowerCase()).not.toContain("<style");
   });
 
+  it("strips <svg>/<math> embedding vectors (guards against allowlist regression)", () => {
+    expect(html.toLowerCase()).not.toContain("<svg");
+    expect(html.toLowerCase()).not.toContain("<math");
+  });
+
   it("still renders the benign heading text", () => {
     expect(html).toContain("Hello");
   });
