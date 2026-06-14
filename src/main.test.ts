@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { dirnameOf } from "./main";
+import { describe, it, expect, beforeEach } from "vitest";
+import { dirnameOf, setEncoding } from "./main";
+import type { LoadedFile } from "./types";
 
 describe("dirnameOf", () => {
   it("returns the POSIX parent directory", () => {
@@ -16,5 +17,29 @@ describe("dirnameOf", () => {
 
   it("handles a mixed-separator path by cutting at the last separator", () => {
     expect(dirnameOf("/home/user\\b.md")).toBe("/home/user");
+  });
+});
+
+describe("setEncoding", () => {
+  beforeEach(() => {
+    document.body.innerHTML =
+      '<main id="content"></main><footer id="statusbar"><span id="encoding"></span></footer>';
+  });
+
+  it("shows the detected encoding from a LoadedFile in #encoding", () => {
+    const file: LoadedFile = {
+      path: "/docs/legacy.txt",
+      text: "本文",
+      encoding: "Shift_JIS",
+      kind: "PlainText",
+    };
+    setEncoding(file.encoding);
+    expect(document.getElementById("encoding")?.textContent).toBe("Shift_JIS");
+  });
+
+  it("clears #encoding when given an empty string (no file)", () => {
+    setEncoding("Shift_JIS");
+    setEncoding("");
+    expect(document.getElementById("encoding")?.textContent).toBe("");
   });
 });
