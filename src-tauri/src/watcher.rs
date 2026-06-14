@@ -3,7 +3,7 @@ use crate::loader;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
@@ -23,17 +23,29 @@ impl Debouncer {
         }
     }
 
+    /// `now_ms` 時点でイベントを発火すべきかを判定する読み取り専用チェック（内部状態は変えない）。
+    /// commit と分離することで、再読込が成功したときだけクロックを進められる。
+    fn would_emit(&self, now_ms: u128) -> bool {
+        match self.last_emit_ms {
+            None => true,
+            Some(last) => now_ms.saturating_sub(last) >= self.quiet_ms,
+        }
+    }
+
+    /// 発火を確定し、直近の発火受理時刻を `now_ms` に進める。
+    fn commit(&mut self, now_ms: u128) {
+        self.last_emit_ms = Some(now_ms);
+    }
+
     /// `now_ms` 時点でイベントを発火すべきなら true を返し、内部の発火時刻を更新する。
     /// 発火しない（合体する）場合は false を返し、last_emit は据え置く。
     fn should_emit(&mut self, now_ms: u128) -> bool {
-        let fire = match self.last_emit_ms {
-            None => true,
-            Some(last) => now_ms.saturating_sub(last) >= self.quiet_ms,
-        };
-        if fire {
-            self.last_emit_ms = Some(now_ms);
+        if self.would_emit(now_ms) {
+            self.commit(now_ms);
+            true
+        } else {
+            false
         }
-        fire
     }
 }
 
@@ -55,35 +67,59 @@ pub struct DocWatcher {
 pub fn watch_file(app: AppHandle, window_label: String, path: PathBuf) -> DocWatcher {
     // Instant 起点。コールバックでの経過ミリ秒を Debouncer に渡す（実時計を Debouncer に持ち込まない）。
     let started = Instant::now();
-    let debouncer = Arc::new(Mutex::new(Debouncer::new(150)));
+    // Debouncer は move-closure が単独所有するため Arc 不要。plain Mutex を直接 move する。
+    let debouncer = Mutex::new(Debouncer::new(150));
     let cb_path = path.clone();
 
     let mut watcher: RecommendedWatcher =
         notify::recommended_watcher(move |res: notify::Result<Event>| {
             let event = match res {
                 Ok(ev) => ev,
-                Err(_) => return,
+                Err(e) => {
+                    eprintln!("penna: notify error for {}: {}", cb_path.display(), e);
+                    return;
+                }
             };
 
             match event.kind {
                 EventKind::Modify(_) | EventKind::Create(_) => {
                     let now_ms = started.elapsed().as_millis();
-                    let should = {
+                    // would_emit は読み取り専用。再読込が成功したときだけ commit してクロックを進める。
+                    let would = {
                         // Debouncer の lock は短時間だけ保持する。
-                        let mut d = match debouncer.lock() {
+                        let d = match debouncer.lock() {
                             Ok(d) => d,
-                            Err(_) => return,
+                            Err(e) => {
+                                eprintln!(
+                                    "penna: debouncer mutex poisoned for {}: {}",
+                                    cb_path.display(),
+                                    e
+                                );
+                                return;
+                            }
                         };
-                        d.should_emit(now_ms)
+                        d.would_emit(now_ms)
                     };
-                    if !should {
+                    if !would {
                         return;
                     }
                     match loader::load_file(&cb_path) {
                         Ok(loaded) => {
+                            // 再読込成功時のみ発火確定。これ以降の 150ms 内のイベントを合体させる。
+                            match debouncer.lock() {
+                                Ok(mut d) => d.commit(now_ms),
+                                Err(e) => {
+                                    eprintln!(
+                                        "penna: debouncer mutex poisoned for {}: {}",
+                                        cb_path.display(),
+                                        e
+                                    );
+                                    return;
+                                }
+                            }
                             let _ = app.emit_to(&window_label, "file-changed", loaded);
                         }
-                        // 読込失敗（保存途中の一時的な空ファイル等）は無視し、次のイベントで再評価する。
+                        // 読込失敗（保存途中の一時的な空ファイル等）は commit せず、次のイベントで即座に再評価する。
                         Err(_) => {}
                     }
                 }
