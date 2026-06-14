@@ -1,0 +1,135 @@
+/* src/styles/theme.css */
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #57606a;
+  --accent: #0969da;
+  --code-bg: #f6f8fa;
+  --border: #d0d7de;
+  --hit-bg: #fff3a3;
+  --hit-active-bg: #ffb454;
+
+  color-scheme: light;
+  background-color: var(--bg);
+  color: var(--fg);
+  font-size: 16px;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --accent: #4493f8;
+  --code-bg: #161b22;
+  --border: #30363d;
+  --hit-bg: #6a5a00;
+  --hit-active-bg: #b58900;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--app-font, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+}
+
+/* Status bar: encoding indicator (spec §7 — show detection result in-window) */
+#statusbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.2rem 0.8rem;
+  border-top: 1px solid var(--border);
+  background-color: var(--code-bg);
+}
+.status-encoding {
+  color: var(--muted);
+  font-size: 0.75em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+#statusbar:empty,
+.status-encoding:empty {
+  /* Keep the bar; the encoding span is simply blank when no file is open. */
+}
+
+/* Removed-file / status banner */
+.doc-banner {
+  margin: 0 0 1rem;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  background-color: var(--code-bg);
+  color: var(--fg);
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* Settings panel */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.settings-label {
+  color: var(--muted);
+}
+.settings-panel input[type="text"],
+.settings-panel input[type="number"],
+.settings-panel select {
+  background-color: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+/* Drop zone */
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 60vh;
+  margin: 2rem;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.drop-zone[data-state="active"] {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+.drop-zone-exts {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+.drop-zone-open {
+  padding: 0.4rem 1.2rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--code-bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.drop-zone-open:hover {
+  border-color: var(--accent);
+}
