@@ -56,6 +56,12 @@ export function mountDropZone(root: HTMLElement, onOpen: (path: string) => void)
     });
   });
 
+  // A single physical drop can surface through BOTH the Tauri native
+  // drag-drop event (absolute paths[]) and the DOM 'drop' event (File.path).
+  // The Tauri handler marks the drop as handled so the DOM handler no-ops,
+  // preventing onOpen from firing (and opening a window) twice.
+  let tauriHandled = false;
+
   // Tauri webview native drag-drop (provides absolute paths[]).
   const webview = getCurrentWebviewWindow();
   void webview.onDragDropEvent((event) => {
@@ -63,6 +69,7 @@ export function mountDropZone(root: HTMLElement, onOpen: (path: string) => void)
     if (payload.type === "drop") {
       const path = extractDroppedPath({ paths: payload.paths });
       zone.dataset.state = "idle";
+      tauriHandled = true;
       if (path) onOpen(path);
     } else if (payload.type === "enter" || payload.type === "over") {
       zone.dataset.state = "active";
@@ -82,6 +89,10 @@ export function mountDropZone(root: HTMLElement, onOpen: (path: string) => void)
   zone.addEventListener("drop", (e) => {
     e.preventDefault();
     zone.dataset.state = "idle";
+    if (tauriHandled) {
+      tauriHandled = false;
+      return;
+    }
     const path = extractDroppedPath(e);
     if (path) onOpen(path);
   });

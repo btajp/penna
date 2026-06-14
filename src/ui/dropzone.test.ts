@@ -85,4 +85,29 @@ describe("mountDropZone", () => {
 
     expect(onOpen).not.toHaveBeenCalled();
   });
+
+  it("ignores a DOM drop that follows a Tauri drop (no double open)", async () => {
+    let handler: (e: { payload: { type: string; paths?: string[] } }) => void = () => {};
+    onDragDropEvent.mockImplementation(async (cb) => {
+      handler = cb as typeof handler;
+      return () => {};
+    });
+    const onOpen = vi.fn();
+    mountDropZone(root, onOpen);
+    await Promise.resolve();
+
+    // Tauri native drop fires first and handles the path.
+    handler({ payload: { type: "drop", paths: ["/dropped/file.md"] } });
+
+    // The same physical drop also surfaces a DOM 'drop' with File.path.
+    const zone = root.querySelector<HTMLElement>(".drop-zone")!;
+    const file = new File(["x"], "file.md");
+    Object.defineProperty(file, "path", { value: "/dropped/file.md" });
+    const ev = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "dataTransfer", { value: { files: [file] } });
+    zone.dispatchEvent(ev);
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith("/dropped/file.md");
+  });
 });

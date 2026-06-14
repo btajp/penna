@@ -93,12 +93,14 @@ export function mountSettingsPanel(
     el.addEventListener("change", onChange);
   }
 
-  void get().then((s) => {
-    theme.value = s.theme;
-    sessionRestore.checked = s.sessionRestore;
-    autoReload.checked = s.autoReload;
-    fontFamily.value = s.fontFamily ?? "";
-    fontSize.value = String(s.fontSize);
-    defaultEncoding.value = s.defaultEncoding;
-  });
+  void get()
+    .then((s) => {
+      theme.value = s.theme;
+      sessionRestore.checked = s.sessionRestore;
+      autoReload.checked = s.autoReload;
+      fontFamily.value = s.fontFamily ?? "";
+      fontSize.value = String(s.fontSize);
+      defaultEncoding.value = s.defaultEncoding;
+    })
+    .catch(() => {});
 }

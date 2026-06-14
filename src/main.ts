@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { LoadedFile, Settings } from "./types";
 import { renderDocument } from "./markdown/renderer";
 import { highlightAll } from "./markdown/highlight";
@@ -14,6 +13,16 @@ import "./styles/theme.css";
 import "./styles/markdown.css";
 
 const BASE_FONT_SIZE = 16;
+
+/** Frontend mirror of the Rust `Settings::default()` (src-tauri/src/settings.rs). */
+const DEFAULT_SETTINGS: Settings = {
+  theme: "system",
+  sessionRestore: false,
+  autoReload: true,
+  fontFamily: null,
+  fontSize: 16,
+  defaultEncoding: "UTF-8",
+};
 
 /** ファイルパス → 親ディレクトリ（POSIX `/` と Windows `\` の両対応）。 */
 export function dirnameOf(path: string): string {
@@ -80,7 +89,12 @@ async function bootstrap(): Promise<void> {
   const contentEl = document.querySelector<HTMLElement>("#content")!;
   const settingsEl = document.querySelector<HTMLElement>("#settings")!;
 
-  let settings = await invoke<Settings>("get_settings");
+  let settings: Settings;
+  try {
+    settings = await invoke<Settings>("get_settings");
+  } catch {
+    settings = DEFAULT_SETTINGS;
+  }
   applyTheme(settings.theme);
   applyFont(settings.fontFamily);
   setZoom(settings.fontSize / BASE_FONT_SIZE);
@@ -95,8 +109,6 @@ async function bootstrap(): Promise<void> {
   const findBar = new FindBar(document.body);
   wireKeyboard(findBar);
 
-  const webview = getCurrentWebviewWindow();
-  void webview.label;
   const path = await invoke<string | null>("window_path");
 
   if (path) {
@@ -108,27 +120,35 @@ async function bootstrap(): Promise<void> {
       setEncoding(file.encoding);
     }
 
-    const file = await invoke<LoadedFile>("load_file", { path });
-    render(file);
+    try {
+      const file = await invoke<LoadedFile>("load_file", { path });
+      render(file);
 
-    contentEl.addEventListener("click", (event) =>
-      handleContentClick(event, baseDir, { invoke }),
-    );
+      contentEl.addEventListener("click", (event) =>
+        handleContentClick(event, baseDir, { invoke }),
+      );
 
-    await wireAutoReload(
-      () => settings.autoReload,
-      (updated) => {
-        const scrollTop = document.documentElement.scrollTop;
-        render(updated);
-        document.documentElement.scrollTop = scrollTop;
-      },
-      (removed) => {
-        const banner = document.createElement("div");
-        banner.className = "doc-banner";
-        banner.textContent = `File no longer available: ${removed}`;
-        contentEl.prepend(banner);
-      },
-    );
+      await wireAutoReload(
+        () => settings.autoReload,
+        (updated) => {
+          const scrollTop = document.documentElement.scrollTop;
+          render(updated);
+          document.documentElement.scrollTop = scrollTop;
+        },
+        (removed) => {
+          const banner = document.createElement("div");
+          banner.className = "doc-banner";
+          banner.textContent = `File no longer available: ${removed}`;
+          contentEl.prepend(banner);
+        },
+      );
+    } catch (err) {
+      setEncoding("");
+      const banner = document.createElement("div");
+      banner.className = "doc-banner doc-banner--error";
+      banner.textContent = `Could not open file: ${path}\n${String(err)}`;
+      contentEl.prepend(banner);
+    }
   } else {
     setEncoding("");
     mountDropZone(contentEl, (p) => {
@@ -138,5 +158,5 @@ async function bootstrap(): Promise<void> {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  void bootstrap();
+  bootstrap().catch((e) => console.error("penna bootstrap failed", e));
 });
