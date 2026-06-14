@@ -49,6 +49,12 @@
         "mimeType": "text/markdown",
         "description": "Markdown document"
       }
-    ]
+    ],
+    "macOS": {
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "signingIdentity": null,
+      "minimumSystemVersion": "11.0"
+    }
   }
 }
