@@ -153,14 +153,14 @@ pub fn persist_session(app: &tauri::AppHandle) {
 
 /// 起動引数列からファイルパスを 1 つ取り出す純関数。
 /// - 先頭要素（プログラム名）は読み飛ばす。
-/// - `-` で始まるフラグは無視する。
+/// - `-` で始まるフラグ、および空文字列は無視する。
 /// - 最初に見つかった非フラグのトークンをパスとして採用する。
 /// - 絶対パスはそのまま、相対パスは cwd に結合する。
 /// - 該当が無ければ None。
 pub fn parse_file_arg(args: &[String], cwd: &Path) -> Option<PathBuf> {
     args.iter()
         .skip(1)
-        .find(|a| !a.starts_with('-'))
+        .find(|a| !a.is_empty() && !a.starts_with('-'))
         .map(|a| {
             let p = PathBuf::from(a);
             if p.is_absolute() {
@@ -311,6 +311,20 @@ mod tests {
     #[test]
     fn parse_file_arg_only_flags_is_none() {
         let args = vec!["penna".to_string(), "--version".to_string()];
+        let cwd = Path::new("/work");
+        assert_eq!(parse_file_arg(&args, cwd), None);
+    }
+
+    #[test]
+    fn parse_file_arg_empty_string_is_none() {
+        let args = vec!["penna".to_string(), "".to_string()];
+        let cwd = Path::new("/work");
+        assert_eq!(parse_file_arg(&args, cwd), None);
+    }
+
+    #[test]
+    fn parse_file_arg_bare_dash_is_none() {
+        let args = vec!["penna".to_string(), "-".to_string()];
         let cwd = Path::new("/work");
         assert_eq!(parse_file_arg(&args, cwd), None);
     }

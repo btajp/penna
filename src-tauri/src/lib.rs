@@ -12,13 +12,16 @@ use crate::window::WindowRegistry;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
-            let cwd_path = std::path::PathBuf::from(&cwd);
-            if let Err(e) = window::open_from_args(app, &argv, &cwd_path) {
-                eprintln!("failed to open window from second instance: {e}");
-            }
-        }))
+    let builder = tauri::Builder::default();
+    // single-instance MUST be registered first; it is a desktop-only plugin
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+        let cwd_path = std::path::PathBuf::from(&cwd);
+        if let Err(e) = window::open_from_args(app, &argv, &cwd_path) {
+            eprintln!("penna: failed to open window from second instance: {e}");
+        }
+    }));
+    builder
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

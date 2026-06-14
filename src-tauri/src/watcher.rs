@@ -39,6 +39,8 @@ impl Debouncer {
 
     /// `now_ms` 時点でイベントを発火すべきなら true を返し、内部の発火時刻を更新する。
     /// 発火しない（合体する）場合は false を返し、last_emit は据え置く。
+    /// 本番経路は would_emit + commit を直接使うため、これはテスト専用。
+    #[cfg(test)]
     fn should_emit(&mut self, now_ms: u128) -> bool {
         if self.would_emit(now_ms) {
             self.commit(now_ms);
