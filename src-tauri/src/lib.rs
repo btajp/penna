@@ -5,10 +5,7 @@ mod watcher;
 mod window;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
-
-use crate::window::WindowRegistry;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,7 +23,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            app.manage(WindowRegistry::new());
+            // WindowRegistry はグローバルシングルトン（window::reg()）なので manage 不要。
+            // macOS の openURLs が setup より先に発火しても安全に使える。
 
             // CLI 直接起動（argv にファイル）があればここで開く。
             // Finder 起動（ダブルクリック / 関連付け）は argv に乗らず RunEvent::Opened で来るため、
@@ -108,31 +106,33 @@ pub fn run() {
             // macOS: Finder のダブルクリック / 「このアプリで開く」/ 拡張子関連付けは
             // ファイルを argv ではなく Opened イベントで通知する。各ファイルを文書ウィンドウで開き、
             // 起動時に出した空ウィンドウが残っていれば閉じる。
+            // macOS: Finder のダブルクリック / 「このアプリで開く」/ 拡張子関連付けは
+            // ファイルを argv ではなく openURLs（RunEvent::Opened）で通知する。
+            // openURLs デリゲートは extern "C" の中で、ここでウィンドウを作ると tao の
+            // openURLs ハンドラ内で panic→abort する（特にコールド起動で発火が早いとき）。
+            // よってここではパスをキューに積むだけにし、実際のオープンは
+            // Ready / MainEventsCleared（安全なイベントループ点）で行う。
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Opened { urls } => {
-                // ウィンドウ生成を openURLs デリゲート callback の中で同期的に行うと
-                // tao/wry のイベントループに再入して panic する。run_on_main_thread で
-                // 次のメインスレッド tick に遅延し、デリゲートを抜けてから開く。
                 let paths: Vec<std::path::PathBuf> =
                     urls.iter().filter_map(|u| u.to_file_path().ok()).collect();
-                let handle = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    for path in paths {
-                        if let Err(e) = window::open_document(&handle, path) {
-                            eprintln!("penna: failed to open opened file: {e}");
-                        }
-                    }
-                    window::close_launch_empty(&handle);
-                });
+                window::reg().queue_open(paths);
             }
-            // 起動完了時、argv / Opened で文書を 1 つも開いていなければ既定ウィンドウを出す
-            // （session_restore=ON なら復元、既定 OFF なら空ウィンドウ）。
+            // 起動完了時: 保留中のファイルがあれば開く。1 つも開かれず（argv も保留も無し）
+            // かつ未オープンなら既定ウィンドウ（session_restore=ON なら復元、既定 OFF は空）。
             tauri::RunEvent::Ready => {
-                if !app.state::<WindowRegistry>().has_opened() {
+                // 保留中（openURLs で届いた）ファイルがあれば開く。
+                // 文書が 1 つも開かれなければ既定ウィンドウ（復元 or 空）を出す。
+                if !window::drain_pending_opens(app) {
                     if let Err(e) = window::open_default(app) {
                         eprintln!("penna: failed to open default window: {e}");
                     }
                 }
+            }
+            // イベントループの各周回で保留ファイルを処理する
+            // （起動後＝ウォーム時のオープンや、Ready 後に届いた openURLs 用）。
+            tauri::RunEvent::MainEventsCleared => {
+                window::drain_pending_opens(app);
             }
             _ => {}
         });
