@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -16,6 +16,10 @@ pub struct WindowRegistry {
     counter: AtomicUsize,
     paths: Mutex<HashMap<String, PathBuf>>,
     watchers: Mutex<HashMap<String, DocWatcher>>,
+    /// 起動時に文書ウィンドウを開いたか（argv / RunEvent::Opened 経由）。
+    opened: AtomicBool,
+    /// 起動時に出した空ウィンドウの label（直後に文書が開いたら閉じるため）。
+    launch_empty: Mutex<Option<String>>,
 }
 
 impl WindowRegistry {
@@ -24,6 +28,8 @@ impl WindowRegistry {
             counter: AtomicUsize::new(0),
             paths: Mutex::new(HashMap::new()),
             watchers: Mutex::new(HashMap::new()),
+            opened: AtomicBool::new(false),
+            launch_empty: Mutex::new(None),
         }
     }
 
@@ -79,6 +85,32 @@ impl WindowRegistry {
             .expect("window registry watchers mutex poisoned")
             .remove(label);
     }
+
+    /// 起動時に文書ウィンドウを開いたことを記録する（argv / Opened 経由）。
+    pub fn mark_opened(&self) {
+        self.opened.store(true, Ordering::SeqCst);
+    }
+
+    /// 起動時に文書を開いたか。Ready 時に既定ウィンドウを出すか判断する。
+    pub fn has_opened(&self) -> bool {
+        self.opened.load(Ordering::SeqCst)
+    }
+
+    /// 起動時に出した空ウィンドウの label を覚える。
+    pub fn set_launch_empty(&self, label: String) {
+        *self
+            .launch_empty
+            .lock()
+            .expect("launch_empty mutex poisoned") = Some(label);
+    }
+
+    /// 覚えておいた空ウィンドウ label を取り出してクリアする。
+    pub fn take_launch_empty(&self) -> Option<String> {
+        self.launch_empty
+            .lock()
+            .expect("launch_empty mutex poisoned")
+            .take()
+    }
 }
 
 impl Default for WindowRegistry {
@@ -103,6 +135,7 @@ pub fn open_document(app: &tauri::AppHandle, path: PathBuf) -> Result<String, St
         .map_err(|e| format!("failed to build window: {e}"))?;
 
     registry.register(&label, path.clone());
+    registry.mark_opened();
 
     // 開いたファイルの親ディレクトリを asset プロトコルスコープに再帰許可する。
     // これにより document からの相対パス画像を asset: / convertFileSrc で配信できる。
@@ -198,39 +231,55 @@ pub fn open_from_args(app: &tauri::AppHandle, args: &[String], cwd: &Path) -> Re
     }
 }
 
-/// 初回起動の振り分け（セッション復元考慮、spec §5）。
-/// - ファイル引数あり: そのファイルを開く（復元しない）。
-/// - 引数なし & session_restore=ON: sessionPaths を開き直す（空なら空ウィンドウ）。
-/// - 引数なし & session_restore=OFF（既定）: 空ウィンドウを 1 枚開く。
-pub fn open_first_launch(app: &tauri::AppHandle, args: &[String], cwd: &Path) -> Result<(), String> {
+/// 初回起動の argv 振り分け。ファイル引数があればそれを開く（CLI 直接起動）。
+/// macOS の Finder 起動（ダブルクリック / 「このアプリで開く」/ 拡張子関連付け）は
+/// ファイルを argv で渡さず RunEvent::Opened で通知するため、ここでは何もしない。
+/// 文書を開いたら Ok(true)、引数にファイルが無ければ Ok(false)。
+pub fn open_argv(app: &tauri::AppHandle, args: &[String], cwd: &Path) -> Result<bool, String> {
     if let Some(path) = parse_file_arg(args, cwd) {
         open_document(app, path)?;
-        return Ok(());
-    }
-
-    let settings = crate::settings::load_settings(app);
-    if !settings.session_restore() {
-        open_empty_window(app)?;
-        return Ok(());
-    }
-
-    // session_restore=ON: 前回の sessionPaths を読み出して開き直す。
-    let restored: Vec<String> = match app.store("settings.json") {
-        Ok(store) => store
-            .get("sessionPaths")
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default(),
-        Err(_) => Vec::new(),
-    };
-
-    if restored.is_empty() {
-        open_empty_window(app)?;
+        Ok(true)
     } else {
-        for p in restored {
-            open_document(app, PathBuf::from(p))?;
+        Ok(false)
+    }
+}
+
+/// 文書を 1 つも開かなかったときの既定ウィンドウ（spec §5、Ready 時に呼ぶ）。
+/// - session_restore=ON かつ sessionPaths が空でない: それらを開き直す。
+/// - それ以外（既定 OFF / 復元なし）: 空ウィンドウを 1 枚開き、その label を
+///   launch_empty として記録する（直後に Opened で文書が開いたら閉じるため）。
+pub fn open_default(app: &tauri::AppHandle) -> Result<(), String> {
+    let settings = crate::settings::load_settings(app);
+    if settings.session_restore() {
+        let restored: Vec<String> = match app.store("settings.json") {
+            Ok(store) => store
+                .get("sessionPaths")
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        if !restored.is_empty() {
+            for p in restored {
+                open_document(app, PathBuf::from(p))?;
+            }
+            return Ok(());
         }
     }
+
+    let label = open_empty_window(app)?;
+    app.state::<WindowRegistry>().set_launch_empty(label);
     Ok(())
+}
+
+/// 起動時に出した空ウィンドウが残っていれば閉じる。
+/// macOS で Finder 起動の文書を開いた直後に呼び、空ウィンドウと文書ウィンドウが
+/// 二重に出るのを防ぐ（Ready が Opened より先に走った場合の保険）。
+pub fn close_launch_empty(app: &tauri::AppHandle) {
+    if let Some(label) = app.state::<WindowRegistry>().take_launch_empty() {
+        if let Some(win) = app.get_webview_window(&label) {
+            let _ = win.close();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -243,6 +292,24 @@ mod tests {
         assert_eq!(reg.next_label(), "doc-1");
         assert_eq!(reg.next_label(), "doc-2");
         assert_eq!(reg.next_label(), "doc-3");
+    }
+
+    #[test]
+    fn mark_and_has_opened() {
+        let reg = WindowRegistry::new();
+        assert!(!reg.has_opened());
+        reg.mark_opened();
+        assert!(reg.has_opened());
+    }
+
+    #[test]
+    fn launch_empty_set_take_and_clear() {
+        let reg = WindowRegistry::new();
+        assert_eq!(reg.take_launch_empty(), None);
+        reg.set_launch_empty("doc-3".into());
+        assert_eq!(reg.take_launch_empty(), Some("doc-3".to_string()));
+        // 取り出したらクリアされる。
+        assert_eq!(reg.take_launch_empty(), None);
     }
 
     #[test]

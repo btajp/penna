@@ -28,9 +28,12 @@ pub fn run() {
         .setup(|app| {
             app.manage(WindowRegistry::new());
 
+            // CLI 直接起動（argv にファイル）があればここで開く。
+            // Finder 起動（ダブルクリック / 関連付け）は argv に乗らず RunEvent::Opened で来るため、
+            // 既定ウィンドウは RunEvent::Ready で「まだ何も開いていなければ」出す（二重ウィンドウ回避）。
             let args: Vec<String> = std::env::args().collect();
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            window::open_first_launch(&app.handle().clone(), &args, &cwd)
+            window::open_argv(&app.handle().clone(), &args, &cwd)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
             // ネイティブメニュー（spec §6 #4: File > Open）。
@@ -99,6 +102,38 @@ pub fn run() {
             commands::open_in_new_window,
             commands::window_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running penna");
+        .build(tauri::generate_context!())
+        .expect("error while building penna")
+        .run(|app, event| match event {
+            // macOS: Finder のダブルクリック / 「このアプリで開く」/ 拡張子関連付けは
+            // ファイルを argv ではなく Opened イベントで通知する。各ファイルを文書ウィンドウで開き、
+            // 起動時に出した空ウィンドウが残っていれば閉じる。
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => {
+                // ウィンドウ生成を openURLs デリゲート callback の中で同期的に行うと
+                // tao/wry のイベントループに再入して panic する。run_on_main_thread で
+                // 次のメインスレッド tick に遅延し、デリゲートを抜けてから開く。
+                let paths: Vec<std::path::PathBuf> =
+                    urls.iter().filter_map(|u| u.to_file_path().ok()).collect();
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    for path in paths {
+                        if let Err(e) = window::open_document(&handle, path) {
+                            eprintln!("penna: failed to open opened file: {e}");
+                        }
+                    }
+                    window::close_launch_empty(&handle);
+                });
+            }
+            // 起動完了時、argv / Opened で文書を 1 つも開いていなければ既定ウィンドウを出す
+            // （session_restore=ON なら復元、既定 OFF なら空ウィンドウ）。
+            tauri::RunEvent::Ready => {
+                if !app.state::<WindowRegistry>().has_opened() {
+                    if let Err(e) = window::open_default(app) {
+                        eprintln!("penna: failed to open default window: {e}");
+                    }
+                }
+            }
+            _ => {}
+        });
 }
