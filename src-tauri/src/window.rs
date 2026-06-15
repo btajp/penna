@@ -97,6 +97,8 @@ pub fn open_document(app: &tauri::AppHandle, path: PathBuf) -> Result<String, St
 
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
         .title("penna")
+        .inner_size(900.0, 700.0)
+        .min_inner_size(360.0, 240.0)
         .build()
         .map_err(|e| format!("failed to build window: {e}"))?;
 
@@ -143,6 +145,8 @@ pub fn open_empty_window(app: &tauri::AppHandle) -> Result<String, String> {
 
     WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
         .title("penna")
+        .inner_size(900.0, 700.0)
+        .min_inner_size(360.0, 240.0)
         .build()
         .map_err(|e| format!("failed to build window: {e}"))?;
 

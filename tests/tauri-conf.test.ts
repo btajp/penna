@@ -31,10 +31,13 @@ describe("tauri.conf.json file associations", () => {
     expect(assoc.name).toBe("Markdown Document");
   });
 
-  it("hides windows until the frontend is ready", () => {
-    const win = conf.app.windows[0];
-    expect(win.visible).toBe(false);
-    expect(win.width).toBe(900);
-    expect(win.height).toBe(700);
+  it("defines NO static windows (created programmatically by the window manager)", () => {
+    // A static config window with label "doc-1" is auto-created by Tauri at startup and
+    // collides with the window manager's first programmatic window (also "doc-1"),
+    // causing a "webview with label `doc-1` already exists" panic on launch. All windows
+    // must be created programmatically (open_document / open_empty_window), with their
+    // size set on the WebviewWindowBuilder, so app.windows must be empty.
+    expect(Array.isArray(conf.app.windows)).toBe(true);
+    expect(conf.app.windows).toHaveLength(0);
   });
 });
