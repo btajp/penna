@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    macOS のネイティブなウィンドウ復元（終了/再起動時に前回のウィンドウを勝手に開き直す挙動）を無効化する。
+    penna は自前のセッション復元（既定 OFF）を持ち、ユーザーは OS による勝手な復元を望まないため。
+    あわせて、クラッシュ後の復元経路（restoreAllPersistentStateWithFullFidelity → openURLs）を断ち、
+    起動時クラッシュの再発防止にもなる。
+  -->
+  <key>NSQuitAlwaysKeepsWindows</key>
+  <false/>
+</dict>
+</plist>
