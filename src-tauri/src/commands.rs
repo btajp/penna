@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::loader::{self, LoadedFile};
 use crate::settings::{self, Settings};
-use crate::window::{self, WindowRegistry};
+use crate::window;
 
 /// パスを読み込み、エンコーディング判定済みの LoadedFile を返す。
 #[tauri::command]
@@ -70,9 +70,8 @@ pub fn open_in_new_window(app: AppHandle, path: String) -> Result<String, String
 
 /// このウィンドウに登録されたファイルパスを返す。空ウィンドウなら None。
 #[tauri::command]
-pub fn window_path(window: tauri::Window, app: AppHandle) -> Option<String> {
-    let registry: State<WindowRegistry> = app.state::<WindowRegistry>();
-    registry
+pub fn window_path(window: tauri::Window) -> Option<String> {
+    window::reg()
         .path_for(window.label())
         .map(|p| p.to_string_lossy().into_owned())
 }

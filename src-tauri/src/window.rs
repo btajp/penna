@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -20,6 +20,10 @@ pub struct WindowRegistry {
     opened: AtomicBool,
     /// 起動時に出した空ウィンドウの label（直後に文書が開いたら閉じるため）。
     launch_empty: Mutex<Option<String>>,
+    /// RunEvent::Opened（macOS の openURLs）で受け取ったが未処理のファイルパス。
+    /// openURLs デリゲート内ではウィンドウを作らず、ここに積むだけにして
+    /// Ready / MainEventsCleared など安全なイベントループ点で開く。
+    pending: Mutex<Vec<PathBuf>>,
 }
 
 impl WindowRegistry {
@@ -30,6 +34,7 @@ impl WindowRegistry {
             watchers: Mutex::new(HashMap::new()),
             opened: AtomicBool::new(false),
             launch_empty: Mutex::new(None),
+            pending: Mutex::new(Vec::new()),
         }
     }
 
@@ -111,6 +116,19 @@ impl WindowRegistry {
             .expect("launch_empty mutex poisoned")
             .take()
     }
+
+    /// openURLs で受け取ったファイルパスを保留キューに積む（ウィンドウは作らない）。
+    pub fn queue_open(&self, paths: Vec<PathBuf>) {
+        self.pending
+            .lock()
+            .expect("pending mutex poisoned")
+            .extend(paths);
+    }
+
+    /// 保留キューを取り出してクリアする（安全なイベントループ点で開くため）。
+    pub fn drain_pending(&self) -> Vec<PathBuf> {
+        std::mem::take(&mut *self.pending.lock().expect("pending mutex poisoned"))
+    }
 }
 
 impl Default for WindowRegistry {
@@ -119,12 +137,24 @@ impl Default for WindowRegistry {
     }
 }
 
+/// プロセスグローバルの WindowRegistry シングルトン。
+/// Tauri の managed state（`app.manage`）にすると、macOS の openURLs（Finder オープン /
+/// 自動再オープン）が setup() の manage より先に発火したとき `app.state()` が
+/// "state() called before manage()" で panic→abort する。グローバルにすることで
+/// manage タイミングに依存せず、最初の Opened イベントから安全に使える。
+static REGISTRY: OnceLock<WindowRegistry> = OnceLock::new();
+
+/// グローバル WindowRegistry を取得する（初回アクセスで初期化）。
+pub fn reg() -> &'static WindowRegistry {
+    REGISTRY.get_or_init(WindowRegistry::new)
+}
+
 /// 指定ファイルを新規ウィンドウで開く。
 /// label を採番し index.html を読み込むウィンドウを生成、label->path を登録、監視を開始する。
 /// ウィンドウクローズ時に label を登録解除してセッションを再永続化する。
 /// 戻り値は生成したウィンドウの label。
 pub fn open_document(app: &tauri::AppHandle, path: PathBuf) -> Result<String, String> {
-    let registry = app.state::<WindowRegistry>();
+    let registry = reg();
     let label = registry.next_label();
 
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
@@ -158,7 +188,7 @@ pub fn open_document(app: &tauri::AppHandle, path: PathBuf) -> Result<String, St
     let close_label = label.clone();
     window.on_window_event(move |event| {
         if matches!(event, tauri::WindowEvent::Destroyed) {
-            let registry = close_app.state::<WindowRegistry>();
+            let registry = reg();
             registry.remove(&close_label);
             persist_session(&close_app);
         }
@@ -173,7 +203,7 @@ pub fn open_document(app: &tauri::AppHandle, path: PathBuf) -> Result<String, St
 /// ファイル未指定の空ウィンドウを開く。パスは登録しないため、
 /// フロント側は window_path で None を受け取りドロップゾーンを表示する。
 pub fn open_empty_window(app: &tauri::AppHandle) -> Result<String, String> {
-    let registry = app.state::<WindowRegistry>();
+    let registry = reg();
     let label = registry.next_label();
 
     WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
@@ -189,7 +219,7 @@ pub fn open_empty_window(app: &tauri::AppHandle) -> Result<String, String> {
 /// 現在登録済みのファイルパス集合を settings.json ストアの "sessionPaths" に書き出す。
 /// session_restore が ON のとき、次回起動でこの集合を開き直す。
 pub fn persist_session(app: &tauri::AppHandle) {
-    let registry = app.state::<WindowRegistry>();
+    let registry = reg();
     let paths: Vec<String> = registry
         .snapshot()
         .into_iter()
@@ -267,7 +297,7 @@ pub fn open_default(app: &tauri::AppHandle) -> Result<(), String> {
     }
 
     let label = open_empty_window(app)?;
-    app.state::<WindowRegistry>().set_launch_empty(label);
+    reg().set_launch_empty(label);
     Ok(())
 }
 
@@ -275,11 +305,35 @@ pub fn open_default(app: &tauri::AppHandle) -> Result<(), String> {
 /// macOS で Finder 起動の文書を開いた直後に呼び、空ウィンドウと文書ウィンドウが
 /// 二重に出るのを防ぐ（Ready が Opened より先に走った場合の保険）。
 pub fn close_launch_empty(app: &tauri::AppHandle) {
-    if let Some(label) = app.state::<WindowRegistry>().take_launch_empty() {
+    if let Some(label) = reg().take_launch_empty() {
         if let Some(win) = app.get_webview_window(&label) {
             let _ = win.close();
         }
     }
+}
+
+/// 保留キュー（openURLs で受け取ったファイル）を安全なイベントループ点で開く。
+/// 1 件以上開いたら true。開いた場合は起動時の空ウィンドウを閉じる。
+/// openURLs デリゲートの中ではなく Ready / MainEventsCleared から呼ぶこと。
+pub fn drain_pending_opens(app: &tauri::AppHandle) -> bool {
+    let pending = reg().drain_pending();
+    if !pending.is_empty() {
+        // 既に開いているファイルと、同一バッチ内の重複を除外する。
+        // macOS の自動再オープンが同じ書類を多重に送ってきても 1 枚だけ開くため。
+        let already: HashSet<PathBuf> = reg().snapshot().into_iter().collect();
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        for path in pending {
+            if already.contains(&path) || !seen.insert(path.clone()) {
+                continue;
+            }
+            if let Err(e) = open_document(app, path) {
+                eprintln!("penna: failed to open queued file: {e}");
+            }
+        }
+        close_launch_empty(app);
+    }
+    // 処理後に文書ウィンドウが 1 つ以上開いているか（Ready で既定ウィンドウを出すか判断）。
+    reg().has_opened()
 }
 
 #[cfg(test)]
